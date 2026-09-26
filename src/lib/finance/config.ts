@@ -1,8 +1,9 @@
-import type { FinanceConfig } from "./types";
+import type { CurrencyCode, FinanceConfig } from "./types";
 
 /**
  * Default business rules straight from the ALKWITI mega prompt.
- * These are DEFAULTS only — every value is editable in Settings and persisted.
+ * These are DEFAULTS only — every value is editable in Settings and persisted
+ * when the user presses Save (nothing auto-saves while typing).
  */
 export const DEFAULT_CONFIG: FinanceConfig = {
   founders: [
@@ -31,29 +32,111 @@ export const DEFAULT_CONFIG: FinanceConfig = {
 
 const STORAGE_KEY = "alkwiti.finance.config.v1";
 
-/** Deep-merge persisted config over defaults so new fields survive upgrades. */
-function mergeConfig(base: FinanceConfig, patch: Partial<FinanceConfig> | null): FinanceConfig {
-  if (!patch) return base;
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** Take a finite number from untrusted input, else the fallback. */
+function num(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+function str(v: unknown, fallback: string): string {
+  return typeof v === "string" ? v : fallback;
+}
+
+function currencyCode(v: unknown, fallback: CurrencyCode): CurrencyCode {
+  return v === "INR" || v === "USD" ? v : fallback;
+}
+
+function coerceFounders(v: unknown, base: FinanceConfig["founders"]): FinanceConfig["founders"] {
+  if (!Array.isArray(v)) return base;
+  const merged = base.map((fallback, idx) => {
+    const raw = v[idx];
+    if (!isRecord(raw)) return fallback;
+    return {
+      id: str(raw["id"], fallback.id),
+      name: str(raw["name"], fallback.name),
+      salaryRate: num(raw["salaryRate"], fallback.salaryRate),
+    };
+  });
+  return [merged[0]!, merged[1]!];
+}
+
+/**
+ * Deep-merge untrusted persisted config (localStorage or the Supabase `jsonb`
+ * column) over the defaults, validating every field. New config fields survive
+ * upgrades, and malformed/partial payloads can never produce NaN rates.
+ */
+export function coerceConfig(raw: unknown, base: FinanceConfig = DEFAULT_CONFIG): FinanceConfig {
+  if (!isRecord(raw)) return base;
+
+  const china = isRecord(raw["china"]) ? raw["china"] : {};
+  const operational = isRecord(raw["operational"]) ? raw["operational"] : {};
+  const dubai = isRecord(raw["dubai"]) ? raw["dubai"] : {};
+  const currency = isRecord(raw["currency"]) ? raw["currency"] : {};
+
   return {
-    founders: (patch.founders ?? base.founders) as FinanceConfig["founders"],
-    china: { ...base.china, ...patch.china },
-    operational: { ...base.operational, ...patch.operational },
-    dubai: { ...base.dubai, ...patch.dubai },
-    currency: { ...base.currency, ...patch.currency },
+    founders: coerceFounders(raw["founders"], base.founders),
+    china: {
+      target: num(china["target"], base.china.target),
+      allocationRate: num(china["allocationRate"], base.china.allocationRate),
+    },
+    operational: {
+      rateBeforeChina: num(operational["rateBeforeChina"], base.operational.rateBeforeChina),
+      rateAfterChina: num(operational["rateAfterChina"], base.operational.rateAfterChina),
+    },
+    dubai: {
+      target: num(dubai["target"], base.dubai.target),
+      rateBeforeChina: num(dubai["rateBeforeChina"], base.dubai.rateBeforeChina),
+      rateAfterChina: num(dubai["rateAfterChina"], base.dubai.rateAfterChina),
+    },
+    currency: {
+      default: currencyCode(currency["default"], base.currency.default),
+      usdInrRate: num(currency["usdInrRate"], base.currency.usdInrRate),
+      rateUpdatedAt: str(currency["rateUpdatedAt"], base.currency.rateUpdatedAt),
+    },
   };
 }
 
+/**
+ * Structural equality for two configs. Used to decide whether Settings has
+ * unsaved changes, so it must not depend on key insertion order.
+ */
+export function configsEqual(a: FinanceConfig, b: FinanceConfig): boolean {
+  if (a === b) return true;
+  const foundersEqual = a.founders.every((f, i) => {
+    const o = b.founders[i];
+    return Boolean(o) && f.id === o!.id && f.name === o!.name && f.salaryRate === o!.salaryRate;
+  });
+  return (
+    foundersEqual &&
+    a.china.target === b.china.target &&
+    a.china.allocationRate === b.china.allocationRate &&
+    a.operational.rateBeforeChina === b.operational.rateBeforeChina &&
+    a.operational.rateAfterChina === b.operational.rateAfterChina &&
+    a.dubai.target === b.dubai.target &&
+    a.dubai.rateBeforeChina === b.dubai.rateBeforeChina &&
+    a.dubai.rateAfterChina === b.dubai.rateAfterChina &&
+    a.currency.default === b.currency.default &&
+    a.currency.usdInrRate === b.currency.usdInrRate
+    // rateUpdatedAt is metadata stamped at save time — never a user-visible edit.
+  );
+}
+
+/** Read the browser-cached config. Returns defaults on SSR or bad data. */
 export function loadConfig(): FinanceConfig {
   if (typeof window === "undefined") return DEFAULT_CONFIG;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_CONFIG;
-    return mergeConfig(DEFAULT_CONFIG, JSON.parse(raw) as Partial<FinanceConfig>);
+    return coerceConfig(JSON.parse(raw));
   } catch {
     return DEFAULT_CONFIG;
   }
 }
 
+/** Write the browser cache. This is the offline/not-signed-in tier. */
 export function saveConfig(config: FinanceConfig): void {
   if (typeof window === "undefined") return;
   try {

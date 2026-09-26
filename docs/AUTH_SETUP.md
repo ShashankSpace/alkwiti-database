@@ -106,3 +106,11 @@ Flow: **/auth** → Google → **/auth/callback** (Supabase exchanges the code f
 session via PKCE) → **/** (dashboard). The session is persisted and auto-refreshed;
 `onAuthStateChange` keeps the UI in sync. Signing out clears it and the guard
 sends you back to `/auth`.
+
+---
+
+## Settings follow the account
+
+Once Google sign-in works, saved Settings automatically sync to the signed-in
+user via Supabase Auth user metadata — no tables, no extra setup. See
+[SETTINGS_SYNC.md](./SETTINGS_SYNC.md).

@@ -19,8 +19,20 @@ import type {
 } from "./types";
 
 interface FinanceState {
+  /**
+   * The committed config — what every calculation reads. Settings edits live in
+   * a local draft and only land here when the user presses Save; there is no
+   * auto-save while typing.
+   */
   config: FinanceConfig;
-  updateConfig: (patch: Partial<FinanceConfig> | ((prev: FinanceConfig) => FinanceConfig)) => void;
+  /**
+   * Commit a config: updates the in-memory value and the browser cache.
+   * Account (Supabase) persistence is layered on top by `SettingsSyncProvider`
+   * — call `useSettingsSync().save()` from the UI rather than this directly.
+   */
+  commitConfig: (next: FinanceConfig) => void;
+  /** False until the browser-cached config has been read (SSR renders defaults). */
+  configHydrated: boolean;
 
   /** Active display currency (mirrors config.currency.default but toggled live). */
   currency: CurrencyCode;
@@ -52,12 +64,14 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     isSample: true,
   });
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [configHydrated, setConfigHydrated] = useState(false);
 
-  // Hydrate persisted config on the client (SSR-safe).
+  // Hydrate the browser-cached config on the client (SSR-safe).
   useEffect(() => {
     const stored = loadConfig();
     setConfig(stored);
     setCurrency(stored.currency.default);
+    setConfigHydrated(true);
   }, []);
 
   const refresh = useCallback(() => {
@@ -91,18 +105,18 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     return cleanup;
   }, [refresh]);
 
-  const updateConfig = useCallback<FinanceState["updateConfig"]>((patch) => {
-    setConfig((prev) => {
-      const next = typeof patch === "function" ? patch(prev) : { ...prev, ...patch };
-      saveConfig(next);
-      return next;
-    });
+  const commitConfig = useCallback<FinanceState["commitConfig"]>((next) => {
+    // Cache write happens here (not inside the setState updater) so the reducer
+    // stays pure and React's double-invocation in dev can't write twice.
+    saveConfig(next);
+    setConfig(next);
   }, []);
 
   const value = useMemo<FinanceState>(
     () => ({
       config,
-      updateConfig,
+      commitConfig,
+      configHydrated,
       currency,
       setCurrency,
       invoices,
@@ -116,7 +130,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     }),
     [
       config,
-      updateConfig,
+      commitConfig,
+      configHydrated,
       currency,
       invoices,
       expenses,

@@ -15,12 +15,22 @@ export type ResolvedTheme = "light" | "dark";
 const STORAGE_KEY = "alkwiti.theme.v1";
 
 interface ThemeState {
-  /** The user's preference (may be "system"). */
+  /** The user's saved preference (may be "system"). */
   mode: ThemeMode;
+  /**
+   * An unsaved preference being previewed (Settings → Appearance), or null.
+   * Previews change what you see without persisting anything.
+   */
+  preview: ThemeMode | null;
+  /** What's currently driving the document: `preview ?? mode`. */
+  effectiveMode: ThemeMode;
   /** The concrete theme currently applied. */
   resolved: ResolvedTheme;
+  /** Commit a preference: applies it, persists it, and clears any preview. */
   setMode: (mode: ThemeMode) => void;
-  /** Convenience toggle between light and dark (ignores system). */
+  /** Apply a preference visually without persisting. Pass null to drop the preview. */
+  previewMode: (mode: ThemeMode | null) => void;
+  /** Convenience toggle between light and dark (ignores system). Commits. */
   toggle: () => void;
 }
 
@@ -44,43 +54,56 @@ function applyTheme(resolved: ResolvedTheme) {
   root.style.colorScheme = resolved;
 }
 
+function readStoredMode(): ThemeMode {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
+    if (raw === "light" || raw === "dark" || raw === "system") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "light";
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>("light");
+  const [preview, setPreview] = useState<ThemeMode | null>(null);
   const [resolved, setResolved] = useState<ResolvedTheme>("light");
+  const [hydrated, setHydrated] = useState(false);
 
-  // Hydrate the stored preference on the client (SSR renders light).
+  const effectiveMode = preview ?? mode;
+
+  // Hydrate the stored preference on the client and apply it in the same pass,
+  // so there's no light flash between the inline boot script and React.
   useEffect(() => {
-    let stored: ThemeMode = "light";
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-      if (raw === "light" || raw === "dark" || raw === "system") stored = raw;
-    } catch {
-      /* ignore */
-    }
+    const stored = readStoredMode();
     setModeState(stored);
     const r = resolve(stored);
     setResolved(r);
     applyTheme(r);
+    setHydrated(true);
   }, []);
 
-  // Follow the OS when in "system" mode.
+  // Apply whatever is effective now, and follow the OS while in "system".
   useEffect(() => {
-    if (mode !== "system" || typeof window === "undefined") return;
+    if (!hydrated || typeof window === "undefined") return;
+    const r = resolve(effectiveMode);
+    setResolved(r);
+    applyTheme(r);
+
+    if (effectiveMode !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = () => {
-      const r = resolve("system");
-      setResolved(r);
-      applyTheme(r);
+      const next = resolve("system");
+      setResolved(next);
+      applyTheme(next);
     };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
-  }, [mode]);
+  }, [hydrated, effectiveMode]);
 
   const setMode = useCallback((next: ThemeMode) => {
+    setPreview(null);
     setModeState(next);
-    const r = resolve(next);
-    setResolved(r);
-    applyTheme(r);
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
@@ -88,13 +111,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const previewMode = useCallback((next: ThemeMode | null) => {
+    setPreview(next);
+  }, []);
+
   const toggle = useCallback(() => {
-    setMode(resolve(mode) === "dark" ? "light" : "dark");
-  }, [mode, setMode]);
+    setMode(resolve(effectiveMode) === "dark" ? "light" : "dark");
+  }, [effectiveMode, setMode]);
 
   const value = useMemo<ThemeState>(
-    () => ({ mode, resolved, setMode, toggle }),
-    [mode, resolved, setMode, toggle],
+    () => ({ mode, preview, effectiveMode, resolved, setMode, previewMode, toggle }),
+    [mode, preview, effectiveMode, resolved, setMode, previewMode, toggle],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
