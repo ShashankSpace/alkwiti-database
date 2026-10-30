@@ -10,9 +10,14 @@ import {
   startOfWeek,
 } from "date-fns";
 import type {
+  CashPosition,
+  CashPositionBucket,
+  ExpenseBucket,
+  ExpenseCategory,
   ExpenseRecord,
   FinanceConfig,
   FinancialTotals,
+  FounderConfig,
   GoalContribution,
   Granularity,
   GoalProgress,
@@ -34,12 +39,153 @@ function sumBy<T>(records: T[], pick: (r: T) => number): number {
   return round2(records.reduce((acc, r) => acc + pick(r), 0));
 }
 
+// ---------------------------------------------------------------------------
+// Buckets: which allocation an outflow is spent from
+// ---------------------------------------------------------------------------
+
+/** Display names for the four spending buckets. */
+export const EXPENSE_BUCKET_LABELS: Record<ExpenseBucket, string> = {
+  operational: "Operational",
+  salary: "Founder Salary",
+  china: "China Industry Visit",
+  dubai: "Dubai Incorporation",
+};
+
+/** Display names for the normalized operational categories. */
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  software: "Software & subscriptions",
+  internet: "Internet",
+  marketing: "Marketing",
+  printing: "Printing",
+  brochures: "Brochures",
+  "business-cards": "Business cards",
+  travel: "Travel",
+  office: "Office",
+  "professional-services": "Professional services",
+  "business-tools": "Business tools",
+  other: "Other",
+};
+
+/**
+ * Classify a RAW Category value (e.g. the Notion select label) into a bucket.
+ * Runs on the raw string (trimmed + lower-cased), independently of the
+ * normalized `ExpenseCategory`, which collapses these labels to "other".
+ *
+ *   "Founder Salary"        → salary
+ *   "China Industry Visit"  → china
+ *   "Dubai Incorporation"   → dubai
+ *   anything else           → operational
+ */
+export function classifyRawCategory(raw: string): ExpenseBucket {
+  const v = raw.trim().toLowerCase();
+  if (v === "founder salary") return "salary";
+  if (v === "china industry visit") return "china";
+  if (v === "dubai incorporation") return "dubai";
+  return "operational";
+}
+
+/**
+ * Match a Vendor string from a salary row against the configured founders and
+ * return the matching founder `id`, or `null` if none matches. Tolerant of
+ * casing, surrounding whitespace, and partial names ("Mithrha" vs
+ * "Mithrha Ramakrishnan"): tries exact (case-insensitive) name match, then a
+ * first-token match, then a substring match in either direction. The substring
+ * step ignores strings shorter than 3 characters so "S" or "Sh" never match.
+ */
+export function matchFounder(vendor: string, founders: FounderConfig[]): string | null {
+  const v = vendor.trim().toLowerCase();
+  if (!v) return null;
+
+  // 1. Exact (case-insensitive, trimmed) name match.
+  for (const f of founders) {
+    if (f.name.trim().toLowerCase() === v) return f.id;
+  }
+  // 2. First-token match (e.g. "shashank" ↔ "Shashank Space").
+  const vendorFirst = v.split(/\s+/)[0] ?? "";
+  for (const f of founders) {
+    const founderFirst = f.name.trim().toLowerCase().split(/\s+/)[0] ?? "";
+    if (vendorFirst && founderFirst && vendorFirst === founderFirst) return f.id;
+  }
+  // 3. Substring match in either direction, only for strings of 3+ characters.
+  for (const f of founders) {
+    const n = f.name.trim().toLowerCase();
+    if (Math.min(v.length, n.length) < 3) continue;
+    if (n.includes(v) || v.includes(n)) return f.id;
+  }
+  return null;
+}
+
+/** Total spent from each bucket (INR). */
+export function spentByBucket(expenses: ExpenseRecord[]): Record<ExpenseBucket, number> {
+  const pick = (b: ExpenseBucket) =>
+    sumBy(
+      expenses.filter((e) => e.bucket === b),
+      (e) => e.inrEquivalent,
+    );
+  return {
+    operational: pick("operational"),
+    salary: pick("salary"),
+    china: pick("china"),
+    dubai: pick("dubai"),
+  };
+}
+
+/**
+ * Salary payments derived from salary-bucket expense rows. Vendor → founder via
+ * `matchFounder`; rows that match no founder are summed into `unattributed`
+ * (they still count as expenses and as salary-bucket spend).
+ */
+export function deriveSalaryPayments(
+  expenses: ExpenseRecord[],
+  founders: FounderConfig[],
+): { payments: SalaryPayment[]; unattributed: number } {
+  const payments: SalaryPayment[] = [];
+  let unattributed = 0;
+  for (const e of expenses) {
+    if (e.bucket !== "salary") continue;
+    const founderId = matchFounder(e.vendor ?? "", founders);
+    if (!founderId) {
+      unattributed += e.inrEquivalent;
+      continue;
+    }
+    payments.push({
+      id: e.id,
+      founderId,
+      date: e.date,
+      amount: e.inrEquivalent,
+      ...(e.sample ? { sample: true } : {}),
+    });
+  }
+  return { payments, unattributed: round2(unattributed) };
+}
+
+/** Goal contributions derived from china/dubai-bucket expense rows. */
+export function deriveGoalContributions(expenses: ExpenseRecord[]): GoalContribution[] {
+  const out: GoalContribution[] = [];
+  for (const e of expenses) {
+    if (e.bucket !== "china" && e.bucket !== "dubai") continue;
+    out.push({
+      key: e.bucket,
+      id: e.id,
+      date: e.date,
+      amount: e.inrEquivalent,
+      ...(e.description ? { description: e.description } : {}),
+      ...(e.vendor ? { vendor: e.vendor } : {}),
+      ...(e.sample ? { sample: true } : {}),
+    });
+  }
+  return out;
+}
+
 /** Total ALKWITI revenue (commission) across the given invoices. */
 export function totalRevenue(invoices: InvoiceRecord[]): number {
   return sumBy(invoices, (i) => i.inrEquivalent);
 }
 
-/** Headline totals — the three sales metrics plus expenses and available cash. */
+/**
+ * Headline totals — the three sales metrics plus expenses and available cash.
+ * `expenses` must be ALL outflows (every bucket).
+ */
 export function computeTotals(
   invoices: InvoiceRecord[],
   expenses: ExpenseRecord[],
@@ -59,15 +205,34 @@ export function computeTotals(
 }
 
 /**
- * China goal progress. Accumulated = revenue × china.allocationRate.
- * Considered complete once accumulated ≥ target.
+ * Revenue at which the China goal is fully funded (target ÷ China rate).
+ * Revenue up to this point is split with the "before China" rates; revenue
+ * earned after it uses the "after China" rates and China receives nothing more.
+ */
+export function chinaThresholdRevenue(config: FinanceConfig): number {
+  if (config.china.target <= 0) return 0;
+  if (config.china.allocationRate <= 0) return Infinity;
+  return config.china.target / config.china.allocationRate;
+}
+
+/** Revenue split into the part earned before and after China completes. */
+function splitAtChina(revenue: number, config: FinanceConfig): { before: number; after: number } {
+  const threshold = chinaThresholdRevenue(config);
+  return { before: Math.min(revenue, threshold), after: Math.max(revenue - threshold, 0) };
+}
+
+/**
+ * China goal progress. Accumulated = revenue × china.allocationRate, capped at
+ * the target (revenue after completion is no longer allocated to China).
  */
 export function computeChinaGoal(
   revenue: number,
   config: FinanceConfig,
   contributions: GoalContribution[] = [],
 ): GoalProgress {
-  const accumulated = round2(revenue * config.china.allocationRate);
+  const chinaDone = isChinaComplete(revenue, config);
+  const { before } = splitAtChina(revenue, config);
+  const accumulated = round2(before * config.china.allocationRate);
   const target = config.china.target;
   const remaining = round2(Math.max(target - accumulated, 0));
   const completion = target > 0 ? Math.min(accumulated / target, 1) : 0;
@@ -82,9 +247,10 @@ export function computeChinaGoal(
     accumulated,
     remaining,
     completion,
-    status: accumulated >= target ? "complete" : "in-progress",
-    currentRate: config.china.allocationRate,
+    status: chinaDone ? "complete" : "in-progress",
+    currentRate: chinaDone ? 0 : config.china.allocationRate,
     contributed,
+    unspent: round2(accumulated - contributed),
   };
 }
 
@@ -95,9 +261,8 @@ export function isChinaComplete(revenue: number, config: FinanceConfig): boolean
 
 /**
  * Dubai goal progress. The allocation rate is DYNAMIC:
- *   - 10% (rateBeforeChina) while the China goal is incomplete
- *   - 40% (rateAfterChina) once the China goal is complete
- * The rate is resolved automatically from China's status.
+ *   - rateBeforeChina (e.g. 10%) on revenue earned while China is incomplete
+ *   - rateAfterChina  (e.g. 40%) on revenue earned after China completes
  */
 export function computeDubaiGoal(
   revenue: number,
@@ -106,7 +271,10 @@ export function computeDubaiGoal(
 ): GoalProgress {
   const chinaDone = isChinaComplete(revenue, config);
   const currentRate = chinaDone ? config.dubai.rateAfterChina : config.dubai.rateBeforeChina;
-  const accumulated = round2(revenue * currentRate);
+  const { before, after } = splitAtChina(revenue, config);
+  const accumulated = round2(
+    before * config.dubai.rateBeforeChina + after * config.dubai.rateAfterChina,
+  );
   const target = config.dubai.target;
   const remaining = round2(Math.max(target - accumulated, 0));
   const completion = target > 0 ? Math.min(accumulated / target, 1) : 0;
@@ -127,6 +295,7 @@ export function computeDubaiGoal(
       ? "China Industrial Visit goal completed"
       : "China Industrial Visit goal not yet completed",
     contributed,
+    unspent: round2(accumulated - contributed),
   };
 }
 
@@ -156,8 +325,9 @@ export function computeSalaries(
 /**
  * Operational budget (allocation) vs actual operational spend.
  * The allocation rate is DYNAMIC, gated on the China goal like Dubai:
- *   - rateBeforeChina (e.g. 20%) while the China goal is incomplete
- *   - rateAfterChina  (e.g. 30%) once the China goal is complete
+ *   - rateBeforeChina (e.g. 20%) on revenue earned while China is incomplete
+ *   - rateAfterChina  (e.g. 30%) on revenue earned after China completes
+ * `expenses` may be all outflows; only operational-bucket rows count as spend.
  */
 export function computeOperational(
   revenue: number,
@@ -168,8 +338,14 @@ export function computeOperational(
   const allocationRate = chinaDone
     ? config.operational.rateAfterChina
     : config.operational.rateBeforeChina;
-  const budget = round2(revenue * allocationRate);
-  const spent = sumBy(expenses, (e) => e.inrEquivalent);
+  const { before, after } = splitAtChina(revenue, config);
+  const budget = round2(
+    before * config.operational.rateBeforeChina + after * config.operational.rateAfterChina,
+  );
+  const spent = sumBy(
+    expenses.filter((e) => e.bucket === "operational"),
+    (e) => e.inrEquivalent,
+  );
   const remaining = round2(budget - spent);
   const utilization = budget > 0 ? spent / budget : 0;
   return {
@@ -184,17 +360,76 @@ export function computeOperational(
   };
 }
 
-/** Expense totals grouped by category (INR). */
+/** The category name to show for an expense row. */
+export function expenseCategoryLabel(e: ExpenseRecord): string {
+  if (e.bucket !== "operational") return EXPENSE_BUCKET_LABELS[e.bucket];
+  return e.categoryLabel?.trim() || EXPENSE_CATEGORY_LABELS[e.category];
+}
+
+/**
+ * Expense totals grouped by displayed category (INR), across ALL outflows.
+ * Salary / China / Dubai rows group under their bucket name; operational rows
+ * under their source category label. The amounts sum to the total expenses.
+ */
 export function expensesByCategory(
   expenses: ExpenseRecord[],
-): { category: ExpenseRecord["category"]; amount: number }[] {
-  const map = new Map<ExpenseRecord["category"], number>();
+): { key: string; label: string; bucket: ExpenseBucket; amount: number }[] {
+  const map = new Map<
+    string,
+    { key: string; label: string; bucket: ExpenseBucket; amount: number }
+  >();
   for (const e of expenses) {
-    map.set(e.category, round2((map.get(e.category) ?? 0) + e.inrEquivalent));
+    const label = expenseCategoryLabel(e);
+    const key = label.toLowerCase();
+    const prev = map.get(key);
+    if (prev) prev.amount = round2(prev.amount + e.inrEquivalent);
+    else map.set(key, { key, label, bucket: e.bucket, amount: round2(e.inrEquivalent) });
   }
-  return [...map.entries()]
-    .map(([category, amount]) => ({ category, amount }))
-    .sort((a, b) => b.amount - a.amount);
+  return [...map.values()].sort((a, b) => b.amount - a.amount);
+}
+
+/**
+ * Remaining allocation per bucket (allocated − spent), reconciled with cash.
+ * Σ remaining + unallocated = revenue − all outflows = available cash.
+ * Overspent buckets keep their negative remaining (no clamping).
+ */
+export function computeCashPosition(
+  totals: FinancialTotals,
+  salaries: SalarySummary[],
+  china: GoalProgress,
+  dubai: GoalProgress,
+  operational: OperationalSummary,
+  expenses: ExpenseRecord[],
+): CashPosition {
+  const spent = spentByBucket(expenses);
+  const make = (key: ExpenseBucket, allocated: number): CashPositionBucket => ({
+    key,
+    allocated,
+    spent: spent[key],
+    remaining: round2(allocated - spent[key]),
+  });
+  const buckets = [
+    make(
+      "salary",
+      sumBy(salaries, (s) => s.allocated),
+    ),
+    make("china", china.accumulated),
+    make("dubai", dubai.accumulated),
+    make("operational", operational.budget),
+  ];
+  const totalAllocated = sumBy(buckets, (b) => b.allocated);
+  const totalSpent = sumBy(buckets, (b) => b.spent);
+  const unallocated = round2(totals.alkwitiRevenue - totalAllocated);
+  const totalRemaining = round2(sumBy(buckets, (b) => b.remaining) + unallocated);
+  return {
+    buckets,
+    unallocated,
+    totalAllocated,
+    totalSpent,
+    totalRemaining,
+    availableCash: totals.availableCash,
+    matched: Math.abs(totalRemaining - totals.availableCash) < 0.01,
+  };
 }
 
 /** A signed delta between a current and previous value. */
@@ -230,7 +465,7 @@ export function dataDateRange(
 
 /**
  * Aggregate invoices + expenses into weekly or monthly buckets across a range.
- * Available cash per bucket = bucket revenue − bucket expenses.
+ * Available cash per bucket = bucket revenue − bucket expenses (all outflows).
  */
 export function bucketize(
   invoices: InvoiceRecord[],

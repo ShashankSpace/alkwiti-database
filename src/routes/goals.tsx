@@ -7,6 +7,7 @@ import { GoalCard } from "@/components/dashboard/goal-card";
 import { usePeriodData } from "@/components/dashboard/use-period-data";
 import type { RangePreset } from "@/components/dashboard/date-range";
 import { useFinance } from "@/lib/finance/store";
+import { formatPercent, founderRateLabel } from "@/lib/finance/currency";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/goals")({
@@ -21,6 +22,15 @@ function GoalsPage() {
   const money = useMoney();
 
   const chinaDone = data.china.status === "complete";
+  const salaryRate = config.founders.reduce((s, f) => s + f.salaryRate, 0);
+  const totalBefore =
+    salaryRate +
+    config.china.allocationRate +
+    config.operational.rateBeforeChina +
+    config.dubai.rateBeforeChina;
+  const totalAfter = salaryRate + config.operational.rateAfterChina + config.dubai.rateAfterChina;
+  const allocationsBalanced =
+    Math.abs(totalBefore - 1) <= 0.0005 && Math.abs(totalAfter - 1) <= 0.0005;
 
   return (
     <DashboardShell title="Financial Goals" rangePreset={preset} onRangeChange={setPreset}>
@@ -32,7 +42,7 @@ function GoalsPage() {
           </span>
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-foreground">
-              Dubai allocation stage: {Math.round(data.dubai.currentRate * 100)}% of revenue
+              Dubai allocation stage: {formatPercent(data.dubai.currentRate)} of revenue
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">{data.dubai.rateReason}.</p>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
@@ -44,7 +54,7 @@ function GoalsPage() {
                     : "border-border text-muted-foreground",
                 )}
               >
-                Stage 1 · China incomplete → Dubai {Math.round(config.dubai.rateBeforeChina * 100)}%
+                Stage 1 · China incomplete → Dubai {formatPercent(config.dubai.rateBeforeChina)}
               </span>
               <ArrowRight className="size-3.5 text-muted-foreground" />
               <span
@@ -55,7 +65,7 @@ function GoalsPage() {
                     : "border-border text-muted-foreground",
                 )}
               >
-                Stage 2 · China complete → Dubai {Math.round(config.dubai.rateAfterChina * 100)}%
+                Stage 2 · China complete → Dubai {formatPercent(config.dubai.rateAfterChina)}
               </span>
             </div>
           </div>
@@ -71,7 +81,7 @@ function GoalsPage() {
       {/* Salary allocations */}
       <SectionCard
         title="Founder salary allocations"
-        description="15% of ALKWITI revenue allocated — paid reflects actual Notion salary rows"
+        description={`${founderRateLabel(config.founders.map((f) => f.salaryRate))} — paid reflects Notion Founder Salary rows`}
         className="mt-4"
       >
         <div className="grid gap-5 sm:grid-cols-2">
@@ -79,7 +89,7 @@ function GoalsPage() {
             <div key={s.founderId} className="rounded-xl border border-border bg-background p-4">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-foreground">{s.name}</span>
-                <span className="text-xs text-muted-foreground">{Math.round(s.rate * 100)}%</span>
+                <span className="text-xs text-muted-foreground">{formatPercent(s.rate)}</span>
               </div>
               <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">
                 {money(s.allocated)}
@@ -90,23 +100,42 @@ function GoalsPage() {
               </div>
               <div className="mt-2 flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Paid {money(s.paid)}</span>
-                <span className="font-medium text-foreground">{money(s.outstanding)} unpaid</span>
+                {s.outstanding < 0 ? (
+                  <span className="font-medium text-destructive">
+                    Overpaid by {money(-s.outstanding)}
+                  </span>
+                ) : (
+                  <span className="font-medium text-foreground">{money(s.outstanding)} unpaid</span>
+                )}
               </div>
             </div>
           ))}
         </div>
+        {data.unattributedSalary > 0 && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            {money(data.unattributedSalary)} of founder salary not matched to a founder — check the
+            Vendor in Notion
+          </p>
+        )}
       </SectionCard>
 
       {/* Operational budget */}
       <SectionCard
         title="Operational budget"
-        description={`${Math.round(data.operational.allocationRate * 100)}% allocation vs actual expenses`}
+        description={`${formatPercent(data.operational.allocationRate)} allocation vs operational spend`}
         className="mt-4"
       >
         <div className="grid gap-4 sm:grid-cols-4">
           <Stat label="Allocation" value={money(data.operational.budget)} />
           <Stat label="Actual spend" value={money(data.operational.spent)} />
-          <Stat label="Remaining" value={money(data.operational.remaining)} />
+          <Stat
+            label="Remaining"
+            value={
+              data.operational.remaining < 0
+                ? `Over by ${money(-data.operational.remaining)}`
+                : money(data.operational.remaining)
+            }
+          />
           <Stat label="Utilization" value={`${Math.round(data.operational.utilization * 100)}%`} />
         </div>
         <div className="mt-4">
@@ -117,11 +146,12 @@ function GoalsPage() {
         </div>
         <p className="mt-3 rounded-lg border border-border bg-background px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
           <span className="font-medium text-foreground">
-            Allocation {Math.round(data.operational.allocationRate * 100)}%
+            Allocation {formatPercent(data.operational.allocationRate)}
           </span>
           {" — "}
           {data.operational.rateReason}. Steps up to{" "}
-          {Math.round(config.operational.rateAfterChina * 100)}% once China completes.
+          {formatPercent(config.operational.rateAfterChina)} on revenue earned after China
+          completes.
         </p>
       </SectionCard>
 
@@ -132,24 +162,45 @@ function GoalsPage() {
         className="mt-4"
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <AllocationTile label="Shashank Space" pct="15%" note="Salary" />
-          <AllocationTile label="Mithrha Ramakrishnan" pct="15%" note="Salary" />
-          <AllocationTile label="China visit" pct="40%" note="Goal" accent />
+          {config.founders.map((f) => (
+            <AllocationTile
+              key={f.id}
+              label={f.name}
+              pct={formatPercent(f.salaryRate)}
+              note="Salary"
+            />
+          ))}
+          <AllocationTile
+            label="China visit"
+            pct={formatPercent(data.china.currentRate)}
+            note={chinaDone ? "Complete" : "Goal"}
+            accent
+          />
           <AllocationTile
             label="Operational"
-            pct={`${Math.round(data.operational.allocationRate * 100)}%`}
+            pct={formatPercent(data.operational.allocationRate)}
             note={chinaDone ? "After China" : "Before China"}
           />
           <AllocationTile
             label="Dubai"
-            pct={`${Math.round(data.dubai.currentRate * 100)}%`}
+            pct={formatPercent(data.dubai.currentRate)}
             note={chinaDone ? "After China" : "Before China"}
           />
         </div>
         <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-          Founder salaries (30%) and the China allocation (40%) are fixed. The Operational and Dubai
-          allocations are dynamic — they step up automatically once the China Industrial Visit goal
-          completes.
+          Founder salaries ({formatPercent(salaryRate)}) are fixed. China gets{" "}
+          {formatPercent(config.china.allocationRate)} until its target is reached, then 0%.
+          Operational and Dubai step up from {formatPercent(config.operational.rateBeforeChina)} /{" "}
+          {formatPercent(config.dubai.rateBeforeChina)} to{" "}
+          {formatPercent(config.operational.rateAfterChina)} /{" "}
+          {formatPercent(config.dubai.rateAfterChina)} on revenue earned after China completes.
+          Total: {formatPercent(totalBefore)} before China · {formatPercent(totalAfter)} after.
+          {!allocationsBalanced && (
+            <span className="text-destructive">
+              {" "}
+              Allocations should total 100% — adjust them in Settings.
+            </span>
+          )}
         </p>
       </SectionCard>
     </DashboardShell>

@@ -1,6 +1,7 @@
 import type { GoalProgress } from "@/lib/finance/types";
 import { GoalBar, useMoney } from "./primitives";
 import { cn } from "@/lib/utils";
+import { formatPercent } from "@/lib/finance/currency";
 import { Plane, Building2, CheckCircle2 } from "lucide-react";
 
 const ICONS = { china: Plane, dubai: Building2 } as const;
@@ -21,8 +22,8 @@ export function GoalCard({ goal }: { goal: GoalProgress }) {
           <div>
             <h3 className="text-sm font-semibold text-foreground">{goal.label}</h3>
             <p className="text-xs text-muted-foreground">
-              Target {money(goal.target, { compact: true })} · {Math.round(goal.currentRate * 100)}%
-              of revenue
+              Target {money(goal.target, { compact: true })} · {formatPercent(goal.currentRate)} of
+              revenue
             </p>
           </div>
         </div>
@@ -47,12 +48,26 @@ export function GoalCard({ goal }: { goal: GoalProgress }) {
         <span>{money(goal.remaining)} remaining</span>
       </div>
 
-      {(goal.contributed ?? 0) > 0 && (
-        <div className="mt-3 flex items-center justify-between rounded-lg border border-border bg-background px-2.5 py-2 text-xs">
-          <span className="text-muted-foreground">Contributed (actual)</span>
-          <span className="font-medium tabular-nums text-foreground">
-            {money(goal.contributed ?? 0)}
-          </span>
+      {goal.contributed > 0 && (
+        <div className="mt-3 space-y-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Spent (from Notion)</span>
+            <span className="font-medium tabular-nums text-foreground">
+              {money(goal.contributed)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Unspent allocation</span>
+            {goal.unspent < 0 ? (
+              <span className="font-medium tabular-nums text-destructive">
+                Over by {money(-goal.unspent)}
+              </span>
+            ) : (
+              <span className="font-medium tabular-nums text-foreground">
+                {money(goal.unspent)}
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -66,7 +81,7 @@ export function GoalCard({ goal }: { goal: GoalProgress }) {
           )}
         >
           <span className="font-medium text-foreground">
-            Allocation {Math.round(goal.currentRate * 100)}%
+            Allocation {formatPercent(goal.currentRate)}
           </span>
           {" — "}
           {goal.rateReason}.

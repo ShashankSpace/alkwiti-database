@@ -10,14 +10,7 @@ import {
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from "./config";
 import { dedupeInvoices } from "./data-source";
 import { fetchFinanceData } from "./server";
-import type {
-  CurrencyCode,
-  ExpenseRecord,
-  FinanceConfig,
-  GoalContribution,
-  InvoiceRecord,
-  SalaryPayment,
-} from "./types";
+import type { CurrencyCode, ExpenseRecord, FinanceConfig, InvoiceRecord } from "./types";
 
 interface FinanceState {
   /**
@@ -40,9 +33,8 @@ interface FinanceState {
   setCurrency: (c: CurrencyCode) => void;
 
   invoices: InvoiceRecord[];
+  /** ALL outflows, each tagged with the bucket it is spent from. */
   expenses: ExpenseRecord[];
-  salaryPayments: SalaryPayment[];
-  goalContributions: GoalContribution[];
 
   loading: boolean;
   error: string | null;
@@ -58,8 +50,6 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [currency, setCurrency] = useState<CurrencyCode>(DEFAULT_CONFIG.currency.default);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
-  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
-  const [goalContributions, setGoalContributions] = useState<GoalContribution[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<{ name: string; isSample: boolean }>({
@@ -86,8 +76,6 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setInvoices(dedupeInvoices(payload.invoices));
         setExpenses(payload.expenses);
-        setSalaryPayments(payload.salaryPayments);
-        setGoalContributions(payload.goalContributions);
         setSource(payload.source);
         setError(payload.warning ?? null);
         setLastSyncedAt(new Date());
@@ -125,8 +113,6 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       setCurrency,
       invoices,
       expenses,
-      salaryPayments,
-      goalContributions,
       loading,
       error,
       source,
@@ -140,8 +126,6 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       currency,
       invoices,
       expenses,
-      salaryPayments,
-      goalContributions,
       loading,
       error,
       source,

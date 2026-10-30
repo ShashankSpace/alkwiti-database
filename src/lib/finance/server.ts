@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import type { ExpenseRecord, GoalContribution, InvoiceRecord, SalaryPayment } from "./types";
+import type { ExpenseRecord, InvoiceRecord } from "./types";
 
 /**
  * Server-side finance data loader.
@@ -18,10 +18,8 @@ import type { ExpenseRecord, GoalContribution, InvoiceRecord, SalaryPayment } fr
 export interface FinancePayload {
   source: { name: string; isSample: boolean };
   invoices: InvoiceRecord[];
+  /** ALL outflows; salary payments and goal contributions are derived from these. */
   expenses: ExpenseRecord[];
-  salaryPayments: SalaryPayment[];
-  /** Actual categorized contributions toward the China / Dubai goals. */
-  goalContributions: GoalContribution[];
   /** Present when the configured source failed and we fell back / errored. */
   warning?: string;
 }
@@ -43,36 +41,28 @@ export const fetchFinanceData = createServerFn({ method: "GET" }).handler(
           revenueDatabaseId: revenueDatabaseId!,
           expensesDatabaseId: expensesDatabaseId!,
         });
-        const [invoices, expenses, salaryPayments, goalContributions] = await Promise.all([
+        const [invoices, expenses] = await Promise.all([
           source.getInvoices(),
           source.getExpenses(),
-          source.getSalaryPayments(),
-          source.getGoalContributions(),
         ]);
         return {
           source: { name: source.name, isSample: source.isSample },
           invoices,
           expenses,
-          salaryPayments,
-          goalContributions,
         };
       } catch (e) {
         // Notion configured but failed — surface a warning and fall back to sample
         // so the dashboard still renders instead of white-screening.
         const { SampleDataSource } = await import("./sample-data");
         const source = new SampleDataSource();
-        const [invoices, expenses, salaryPayments, goalContributions] = await Promise.all([
+        const [invoices, expenses] = await Promise.all([
           source.getInvoices(),
           source.getExpenses(),
-          source.getSalaryPayments(),
-          source.getGoalContributions(),
         ]);
         return {
           source: { name: "Sample data", isSample: true },
           invoices,
           expenses,
-          salaryPayments,
-          goalContributions,
           warning:
             e instanceof Error
               ? `Notion fetch failed: ${e.message}. Showing sample data.`
@@ -84,18 +74,11 @@ export const fetchFinanceData = createServerFn({ method: "GET" }).handler(
     // No Notion config — sample data.
     const { SampleDataSource } = await import("./sample-data");
     const source = new SampleDataSource();
-    const [invoices, expenses, salaryPayments, goalContributions] = await Promise.all([
-      source.getInvoices(),
-      source.getExpenses(),
-      source.getSalaryPayments(),
-      source.getGoalContributions(),
-    ]);
+    const [invoices, expenses] = await Promise.all([source.getInvoices(), source.getExpenses()]);
     return {
       source: { name: source.name, isSample: source.isSample },
       invoices,
       expenses,
-      salaryPayments,
-      goalContributions,
     };
   },
 );

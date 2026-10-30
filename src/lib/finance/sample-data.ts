@@ -1,5 +1,5 @@
 import type { FinanceDataSource } from "./data-source";
-import type { ExpenseRecord, GoalContribution, InvoiceRecord, SalaryPayment } from "./types";
+import type { ExpenseRecord, InvoiceRecord } from "./types";
 
 /**
  * ============================================================================
@@ -15,6 +15,9 @@ import type { ExpenseRecord, GoalContribution, InvoiceRecord, SalaryPayment } fr
  * Total sample ALKWITI revenue is tuned so the China goal (₹2.5L) is partway
  * complete — which keeps the Dubai allocation at its "before China" rate,
  * demonstrating the dynamic stage logic on load.
+ *
+ * SAMPLE_EXPENSES holds every outflow: operational spend plus founder salary,
+ * China and Dubai rows, each tagged with the bucket it is spent from.
  */
 
 const inv = (
@@ -209,6 +212,7 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-06-15",
     description: "Sourcing CRM & analytics suite",
     category: "software",
+    bucket: "operational",
     amount: 8400,
     currency: "INR",
     inrEquivalent: 8400,
@@ -220,6 +224,7 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-06-20",
     description: "Company brochures (500 units)",
     category: "brochures",
+    bucket: "operational",
     amount: 12500,
     currency: "INR",
     inrEquivalent: 12500,
@@ -231,6 +236,7 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-07-02",
     description: "Business cards — both founders",
     category: "business-cards",
+    bucket: "operational",
     amount: 3200,
     currency: "INR",
     inrEquivalent: 3200,
@@ -242,6 +248,7 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-07-11",
     description: "LinkedIn ads — supplier outreach",
     category: "marketing",
+    bucket: "operational",
     amount: 18000,
     currency: "INR",
     inrEquivalent: 18000,
@@ -253,6 +260,7 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-07-19",
     description: "Design & productivity tools",
     category: "business-tools",
+    bucket: "operational",
     amount: 5600,
     currency: "INR",
     inrEquivalent: 5600,
@@ -264,6 +272,7 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-08-04",
     description: "Supplier visit — domestic travel",
     category: "travel",
+    bucket: "operational",
     amount: 22400,
     currency: "INR",
     inrEquivalent: 22400,
@@ -275,6 +284,7 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-08-18",
     description: "Legal — Dubai incorporation advisory",
     category: "professional-services",
+    bucket: "operational",
     amount: 26000,
     currency: "INR",
     inrEquivalent: 26000,
@@ -286,6 +296,7 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-09-01",
     description: "Cloud storage & domain renewal",
     category: "software",
+    bucket: "operational",
     amount: 4100,
     currency: "INR",
     inrEquivalent: 4100,
@@ -297,6 +308,7 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-09-12",
     description: "Trade catalogue printing",
     category: "printing",
+    bucket: "operational",
     amount: 9800,
     currency: "INR",
     inrEquivalent: 9800,
@@ -308,61 +320,117 @@ export const SAMPLE_EXPENSES: ExpenseRecord[] = [
     date: "2026-09-19",
     description: "Co-working desk — September",
     category: "office",
+    bucket: "operational",
     amount: 14000,
     currency: "INR",
     inrEquivalent: 14000,
     vendor: "WeWork",
     sample: true,
   },
-];
-
-export const SAMPLE_SALARY_PAYMENTS: SalaryPayment[] = [
-  { id: "PAY-001", founderId: "shashank", date: "2026-07-05", amount: 18000, sample: true },
-  { id: "PAY-002", founderId: "mithrha", date: "2026-07-05", amount: 18000, sample: true },
-  { id: "PAY-003", founderId: "shashank", date: "2026-08-05", amount: 20000, sample: true },
-  { id: "PAY-004", founderId: "mithrha", date: "2026-08-05", amount: 15000, sample: true },
-];
-
-/**
- * Actual categorized contributions toward the China / Dubai goals. These model
- * Notion expense rows tagged "China Industry Visit" / "Dubai Incorporation" —
- * money genuinely spent toward each goal, shown alongside the computed
- * allocation projection (never folded into operational spend).
- */
-export const SAMPLE_GOAL_CONTRIBUTIONS: GoalContribution[] = [
+  // Founder salary payments — outflows from the salary bucket. The Vendor is
+  // the founder's name, which is how payments are attributed to a founder.
   {
-    key: "china",
+    id: "PAY-001",
+    date: "2026-07-05",
+    description: "Founder salary payment",
+    category: "other",
+    categoryLabel: "Founder Salary",
+    bucket: "salary",
+    amount: 18000,
+    currency: "INR",
+    inrEquivalent: 18000,
+    vendor: "Shashank Space",
+    sample: true,
+  },
+  {
+    id: "PAY-002",
+    date: "2026-07-05",
+    description: "Founder salary payment",
+    category: "other",
+    categoryLabel: "Founder Salary",
+    bucket: "salary",
+    amount: 18000,
+    currency: "INR",
+    inrEquivalent: 18000,
+    vendor: "Mithrha Ramakrishnan",
+    sample: true,
+  },
+  {
+    id: "PAY-003",
+    date: "2026-08-05",
+    description: "Founder salary payment",
+    category: "other",
+    categoryLabel: "Founder Salary",
+    bucket: "salary",
+    amount: 20000,
+    currency: "INR",
+    inrEquivalent: 20000,
+    vendor: "Shashank Space",
+    sample: true,
+  },
+  {
+    id: "PAY-004",
+    date: "2026-08-05",
+    description: "Founder salary payment",
+    category: "other",
+    categoryLabel: "Founder Salary",
+    bucket: "salary",
+    amount: 15000,
+    currency: "INR",
+    inrEquivalent: 15000,
+    vendor: "Mithrha Ramakrishnan",
+    sample: true,
+  },
+  // Goal spend — outflows from the China / Dubai buckets.
+  {
     id: "GC-001",
     date: "2026-07-14",
-    amount: 32000,
     description: "China Industry Visit — flight deposit",
+    category: "other",
+    categoryLabel: "China Industry Visit",
+    bucket: "china",
+    amount: 32000,
+    currency: "INR",
+    inrEquivalent: 32000,
     vendor: "Air China",
     sample: true,
   },
   {
-    key: "china",
     id: "GC-002",
     date: "2026-08-22",
-    amount: 18500,
     description: "China Industry Visit — supplier meeting logistics",
+    category: "other",
+    categoryLabel: "China Industry Visit",
+    bucket: "china",
+    amount: 18500,
+    currency: "INR",
+    inrEquivalent: 18500,
     vendor: "Guangzhou Expo",
     sample: true,
   },
   {
-    key: "dubai",
     id: "GC-003",
     date: "2026-08-09",
-    amount: 45000,
     description: "Dubai Incorporation — licensing fee",
+    category: "other",
+    categoryLabel: "Dubai Incorporation",
+    bucket: "dubai",
+    amount: 15000,
+    currency: "INR",
+    inrEquivalent: 15000,
     vendor: "Emirates Corp Advisory",
     sample: true,
   },
   {
-    key: "dubai",
     id: "GC-004",
     date: "2026-09-16",
-    amount: 21000,
     description: "Dubai Incorporation — registered agent",
+    category: "other",
+    categoryLabel: "Dubai Incorporation",
+    bucket: "dubai",
+    amount: 6000,
+    currency: "INR",
+    inrEquivalent: 6000,
     vendor: "Emirates Corp Advisory",
     sample: true,
   },
@@ -378,11 +446,5 @@ export class SampleDataSource implements FinanceDataSource {
   }
   async getExpenses(): Promise<ExpenseRecord[]> {
     return SAMPLE_EXPENSES;
-  }
-  async getSalaryPayments(): Promise<SalaryPayment[]> {
-    return SAMPLE_SALARY_PAYMENTS;
-  }
-  async getGoalContributions(): Promise<GoalContribution[]> {
-    return SAMPLE_GOAL_CONTRIBUTIONS;
   }
 }

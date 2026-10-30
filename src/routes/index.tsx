@@ -8,6 +8,8 @@ import { GoalCard } from "@/components/dashboard/goal-card";
 import { usePeriodData } from "@/components/dashboard/use-period-data";
 import type { RangePreset } from "@/components/dashboard/date-range";
 import { useFinance } from "@/lib/finance/store";
+import { formatPercent, founderRateLabel } from "@/lib/finance/currency";
+import type { ExpenseBucket } from "@/lib/finance/types";
 import { format, parseISO } from "date-fns";
 
 export const Route = createFileRoute("/")({
@@ -17,11 +19,28 @@ export const Route = createFileRoute("/")({
   component: Overview,
 });
 
+const BUCKET_ORDER: ExpenseBucket[] = ["operational", "salary", "china", "dubai"];
+
+const BUCKET_NAMES: Record<ExpenseBucket, string> = {
+  operational: "Operational",
+  salary: "Founder salaries",
+  china: "China visit",
+  dubai: "Dubai",
+};
+
 function Overview() {
   const [preset, setPreset] = useState<RangePreset>("all");
   const data = usePeriodData(preset);
-  const { salaryPayments } = useFinance();
+  const { config } = useFinance();
   const money = useMoney();
+
+  const salaryRate = config.founders.reduce((s, f) => s + f.salaryRate, 0);
+  const bucketRates: Record<ExpenseBucket, number> = {
+    salary: salaryRate,
+    china: data.china.currentRate,
+    dubai: data.dubai.currentRate,
+    operational: data.operational.allocationRate,
+  };
 
   const recent = [
     ...data.currentInvoices.map((i) => ({
@@ -29,7 +48,7 @@ function Overview() {
       date: i.date,
       kind: "Revenue" as const,
       label: `${i.customer} · ${i.product}`,
-      amount: i.alkwitiRevenue,
+      amount: i.inrEquivalent,
       positive: true,
     })),
     ...data.currentExpenses.map((e) => ({
@@ -90,56 +109,67 @@ function Overview() {
           <RevenueChart invoices={data.currentInvoices} expenses={data.currentExpenses} />
         </SectionCard>
 
-        <SectionCard title="Cash position" description="Revenue minus money actually spent">
+        <SectionCard title="Cash position" description="Revenue minus all money that went out">
           <div className="space-y-3">
             <SummaryRow label="Total revenue" value={money(data.lifetime.alkwitiRevenue)} />
             <SummaryRow
-              label="Actual expenses"
+              label="Actual expenses (all outflows)"
               value={`− ${money(data.lifetime.expenses)}`}
               muted
             />
+            {BUCKET_ORDER.filter((b) => data.lifetimeSpent[b] !== 0).map((b) => (
+              <SummaryRow
+                key={b}
+                label={`· ${BUCKET_NAMES[b]}`}
+                value={money(data.lifetimeSpent[b])}
+                small
+                muted
+              />
+            ))}
             <div className="h-px bg-border" />
             <SummaryRow label="Available cash" value={money(data.lifetime.availableCash)} strong />
 
             <div className="mt-4 rounded-xl border border-border bg-background p-3">
-              <p className="text-xs font-medium text-muted-foreground">Allocated (not yet spent)</p>
+              <p className="text-xs font-medium text-muted-foreground">
+                Remaining allocation (allocated − spent)
+              </p>
               <div className="mt-2 space-y-2 text-sm">
-                <SummaryRow
-                  label="Founder salaries (30%)"
-                  value={money(data.salaries.reduce((s, x) => s + x.allocated, 0))}
-                  small
-                />
-                <SummaryRow label="China visit (40%)" value={money(data.china.accumulated)} small />
-                {data.china.contributed > 0 && (
+                {data.cash.buckets.map((b) => (
                   <SummaryRow
-                    label="China contributed (actual)"
-                    value={money(data.china.contributed)}
+                    key={b.key}
+                    label={`${BUCKET_NAMES[b.key]} (${formatPercent(bucketRates[b.key])})`}
+                    value={b.remaining < 0 ? `Over by ${money(-b.remaining)}` : money(b.remaining)}
+                    hint={`${money(b.allocated)} allocated − ${money(b.spent)} spent`}
+                    tone={b.remaining < 0 ? "destructive" : undefined}
                     small
-                    muted
+                  />
+                ))}
+                {Math.abs(data.cash.unallocated) >= 0.5 && (
+                  <SummaryRow
+                    label="Unallocated"
+                    value={money(data.cash.unallocated)}
+                    hint="Allocation rates in Settings don't total 100%"
+                    small
                   />
                 )}
+                <div className="h-px bg-border" />
                 <SummaryRow
-                  label={`Dubai (${Math.round(data.dubai.currentRate * 100)}%)`}
-                  value={money(data.dubai.accumulated)}
-                  small
-                />
-                {data.dubai.contributed > 0 && (
-                  <SummaryRow
-                    label="Dubai contributed (actual)"
-                    value={money(data.dubai.contributed)}
-                    small
-                    muted
-                  />
-                )}
-                <SummaryRow
-                  label={`Operational (${Math.round(data.operational.allocationRate * 100)}%)`}
-                  value={money(data.operational.budget)}
-                  small
+                  label="Total remaining"
+                  value={money(data.cash.totalRemaining)}
+                  hint={
+                    data.cash.matched
+                      ? "✓ Matches available cash"
+                      : `Differs from available cash by ${money(
+                          Math.abs(data.cash.totalRemaining - data.cash.availableCash),
+                        )}`
+                  }
+                  hintTone={data.cash.matched ? "success" : "destructive"}
+                  strong
                 />
               </div>
               <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                Allocations reserve future revenue by plan. They are not expenses until the money is
-                actually spent.
+                Each bucket gets its share of revenue. Money spent from a bucket (from the Notion
+                Category) reduces what remains, so total remaining equals available cash.
               </p>
             </div>
           </div>
@@ -161,7 +191,7 @@ function Overview() {
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <SectionCard
           title="Operational budget"
-          description={`${Math.round(data.operational.allocationRate * 100)}% allocation vs actual spend`}
+          description={`${formatPercent(data.operational.allocationRate)} allocation vs operational spend`}
         >
           <div className="flex items-end justify-between">
             <p className="text-xl font-semibold tabular-nums text-foreground">
@@ -177,11 +207,18 @@ function Overview() {
           </div>
           <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
             <span>{Math.round(data.operational.utilization * 100)}% utilized</span>
-            <span>{money(data.operational.remaining)} remaining</span>
+            {data.operational.remaining < 0 ? (
+              <span className="text-destructive">Over by {money(-data.operational.remaining)}</span>
+            ) : (
+              <span>{money(data.operational.remaining)} remaining</span>
+            )}
           </div>
         </SectionCard>
 
-        <SectionCard title="Founder salary allocations" description="15% of revenue each">
+        <SectionCard
+          title="Founder salary allocations"
+          description={founderRateLabel(config.founders.map((f) => f.salaryRate))}
+        >
           <div className="space-y-4">
             {data.salaries.map((s) => (
               <div key={s.founderId}>
@@ -194,11 +231,23 @@ function Overview() {
                 <div className="mt-1.5">
                   <GoalBar value={s.allocated > 0 ? s.paid / s.allocated : 0} tone="success" />
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {money(s.outstanding)} unpaid allocation
-                </p>
+                {s.outstanding < 0 ? (
+                  <p className="mt-1 text-xs text-destructive">
+                    Overpaid by {money(-s.outstanding)}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {money(s.outstanding)} unpaid allocation
+                  </p>
+                )}
               </div>
             ))}
+            {data.unattributedSalary > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {money(data.unattributedSalary)} of founder salary not matched to a founder — check
+                the Vendor in Notion
+              </p>
+            )}
           </div>
         </SectionCard>
 
@@ -245,29 +294,45 @@ function SummaryRow({
   strong,
   muted,
   small,
+  hint,
+  tone,
+  hintTone,
 }: {
   label: string;
   value: string;
   strong?: boolean;
   muted?: boolean;
   small?: boolean;
+  /** Small secondary line under the row. */
+  hint?: string;
+  /** Colors the value. */
+  tone?: "destructive" | "success" | undefined;
+  /** Colors the hint line. */
+  hintTone?: "destructive" | "success" | undefined;
 }) {
+  const toneClass = (t?: "destructive" | "success") =>
+    t === "destructive" ? "text-destructive" : t === "success" ? "text-success" : "";
   return (
-    <div className="flex items-center justify-between">
-      <span
-        className={`${small ? "text-xs" : "text-sm"} ${
-          muted ? "text-muted-foreground" : "text-foreground"
-        }`}
-      >
-        {label}
-      </span>
-      <span
-        className={`tabular-nums ${small ? "text-xs" : "text-sm"} ${
-          strong ? "text-lg font-semibold text-foreground" : "font-medium text-foreground"
-        }`}
-      >
-        {value}
-      </span>
+    <div>
+      <div className="flex items-center justify-between">
+        <span
+          className={`${small ? "text-xs" : "text-sm"} ${
+            muted ? "text-muted-foreground" : "text-foreground"
+          }`}
+        >
+          {label}
+        </span>
+        <span
+          className={`tabular-nums ${small ? "text-xs" : "text-sm"} ${
+            strong ? "text-lg font-semibold" : "font-medium"
+          } ${toneClass(tone) || "text-foreground"}`}
+        >
+          {value}
+        </span>
+      </div>
+      {hint && (
+        <p className={`text-[11px] ${toneClass(hintTone) || "text-muted-foreground"}`}>{hint}</p>
+      )}
     </div>
   );
 }

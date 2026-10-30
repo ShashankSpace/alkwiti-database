@@ -1,14 +1,18 @@
 import { useMemo } from "react";
 import { useFinance } from "@/lib/finance/store";
 import {
+  computeCashPosition,
   computeChinaGoal,
   computeDubaiGoal,
   computeOperational,
   computeSalaries,
   computeTotals,
   dataDateRange,
+  deriveGoalContributions,
+  deriveSalaryPayments,
   filterByRange,
   kpiDelta,
+  spentByBucket,
 } from "@/lib/finance/engine";
 import { previousRange, resolveRange, type RangePreset } from "./date-range";
 
@@ -21,7 +25,7 @@ import { previousRange, resolveRange, type RangePreset } from "./date-range";
  * cumulative — a date filter narrows the KPIs/charts, not the goal totals.
  */
 export function usePeriodData(preset: RangePreset) {
-  const { invoices, expenses, salaryPayments, goalContributions, config } = useFinance();
+  const { invoices, expenses, config } = useFinance();
 
   return useMemo(() => {
     const derived = dataDateRange(invoices, expenses);
@@ -47,15 +51,22 @@ export function usePeriodData(preset: RangePreset) {
     };
 
     // Lifetime figures drive cumulative goals & allocations.
-    // `expenses` here is the operational-only array: the Notion source's
-    // getExpenses() and SAMPLE_EXPENSES both exclude salary/China/Dubai rows,
-    // so computeTotals / computeOperational are never inflated by them. Real
-    // salary payments and goal contributions flow in via their own channels.
+    // `expenses` is EVERY outflow (operational, salary, China, Dubai), so totals
+    // and available cash count all money that left the account. Salary payments
+    // and goal contributions are derived from the same rows by their bucket;
+    // computeOperational counts only operational-bucket rows as its spend.
+    const { payments: salaryPayments, unattributed: unattributedSalary } = deriveSalaryPayments(
+      expenses,
+      config.founders,
+    );
+    const goalContributions = deriveGoalContributions(expenses);
     const lifetime = computeTotals(invoices, expenses);
+    const lifetimeSpent = spentByBucket(expenses);
     const china = computeChinaGoal(lifetime.alkwitiRevenue, config, goalContributions);
     const dubai = computeDubaiGoal(lifetime.alkwitiRevenue, config, goalContributions);
     const salaries = computeSalaries(lifetime.alkwitiRevenue, config, salaryPayments);
     const operational = computeOperational(lifetime.alkwitiRevenue, config, expenses);
+    const cash = computeCashPosition(lifetime, salaries, china, dubai, operational, expenses);
 
     return {
       range,
@@ -65,10 +76,13 @@ export function usePeriodData(preset: RangePreset) {
       totals,
       deltas,
       lifetime,
+      lifetimeSpent,
       china,
       dubai,
       salaries,
+      unattributedSalary,
       operational,
+      cash,
     };
-  }, [invoices, expenses, salaryPayments, goalContributions, config, preset]);
+  }, [invoices, expenses, config, preset]);
 }

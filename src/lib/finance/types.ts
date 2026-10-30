@@ -61,7 +61,17 @@ export type ExpenseCategory =
   | "business-tools"
   | "other";
 
-/** An actual operating expense — money genuinely spent (not an allocation). */
+/**
+ * Which allocation an outflow is spent from. Decided by the source's Category
+ * ("Founder Salary" → salary, "China Industry Visit" → china,
+ * "Dubai Incorporation" → dubai, anything else → operational).
+ */
+export type ExpenseBucket = "operational" | "salary" | "china" | "dubai";
+
+/**
+ * Money that left the account (not an allocation). EVERY outflow is an
+ * expense; `bucket` says which allocation it is spent from.
+ */
 export interface ExpenseRecord {
   id: string;
   /** Primary date used for weekly/monthly grouping. */
@@ -70,6 +80,8 @@ export interface ExpenseRecord {
   category: ExpenseCategory;
   /** The category name exactly as written in the source (e.g. the Notion select label). */
   categoryLabel?: string;
+  /** The allocation this outflow is spent from. */
+  bucket: ExpenseBucket;
   /** Amount spent (INR). */
   amount: number;
   currency: CurrencyCode;
@@ -84,7 +96,10 @@ export interface ExpenseRecord {
   sample?: boolean;
 }
 
-/** A recorded salary payment actually made to a founder (distinct from allocation). */
+/**
+ * A salary payment actually made to a founder (distinct from allocation).
+ * Derived from salary-bucket expense rows; the row itself is also an expense.
+ */
 export interface SalaryPayment {
   id: string;
   founderId: string;
@@ -94,9 +109,9 @@ export interface SalaryPayment {
 }
 
 /**
- * A recorded contribution actually made toward a goal (China/Dubai), read from
- * a categorized Notion expense row. These are ACTUAL amounts spent toward the
- * goal, distinct from the computed allocation projection on `GoalProgress`.
+ * Money actually spent toward a goal (China/Dubai). Derived from china/dubai
+ * bucket expense rows; the row itself is also an expense. Distinct from the
+ * computed allocation on `GoalProgress`.
  */
 export interface GoalContribution {
   /** Which goal this contribution counts toward. */
@@ -110,7 +125,7 @@ export interface GoalContribution {
   sample?: boolean;
 }
 
-/** A recorded contribution actually set aside toward a goal (optional; allocations are computed). */
+/** A founder and the share of revenue allocated to them as salary. */
 export interface FounderConfig {
   id: string;
   name: string;
@@ -173,11 +188,12 @@ export interface GoalProgress {
   /** Human explanation of why the rate is what it is (Dubai stage). */
   rateReason?: string;
   /**
-   * Actual categorized spend contributed toward this goal (INR), summed from
-   * Notion rows tagged with the goal's category. Distinct from the computed
-   * `accumulated` projection — this is money genuinely spent, not an allocation.
+   * Actual spend toward this goal (INR), summed from expense rows in the goal's
+   * bucket. Money genuinely spent, not an allocation.
    */
   contributed: number;
+  /** accumulated − contributed (INR). Negative when the goal is overspent. */
+  unspent: number;
 }
 
 /** Computed salary allocation vs payments for one founder. */
@@ -194,9 +210,9 @@ export interface SalarySummary {
 export interface OperationalSummary {
   /** Effective rate applied now (before/after China). */
   allocationRate: number;
-  /** revenue * allocationRate */
+  /** Revenue × the operational rate in effect when it was earned (before/after China). */
   budget: number;
-  /** actual qualifying expenses */
+  /** Actual spend from operational-bucket rows only. */
   spent: number;
   remaining: number;
   /** 0..1 */
@@ -210,9 +226,33 @@ export interface FinancialTotals {
   alkwitiRevenue: number;
   productSalesValue: number;
   grossOrderValue: number;
+  /** All outflows (operational, salary, China, Dubai). */
   expenses: number;
-  /** revenue - actual expenses (allocations are NOT treated as expenses). */
+  /** revenue − all outflows (allocations are NOT treated as expenses). */
   availableCash: number;
+}
+
+/** Allocation vs actual spend for one bucket. */
+export interface CashPositionBucket {
+  key: ExpenseBucket;
+  allocated: number;
+  spent: number;
+  /** allocated − spent. Negative when the bucket is overspent. */
+  remaining: number;
+}
+
+/** Per-bucket remaining allocation, reconciled against available cash. */
+export interface CashPosition {
+  buckets: CashPositionBucket[];
+  /** revenue − Σ allocated (non-zero only if the rates don't total 100%). */
+  unallocated: number;
+  totalAllocated: number;
+  totalSpent: number;
+  /** Σ remaining + unallocated. Equals available cash. */
+  totalRemaining: number;
+  availableCash: number;
+  /** True when totalRemaining equals availableCash (to the paisa). */
+  matched: boolean;
 }
 
 /** A single time bucket (a week or a month) of aggregated figures. */

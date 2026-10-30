@@ -36,6 +36,23 @@ export function formatMoney(
   }).format(value);
 }
 
+/**
+ * Format an allocation rate (fraction) as a percent label, keeping one decimal
+ * when needed so 0.125 shows as "12.5%" rather than a rounded "13%".
+ */
+export function formatPercent(fraction: number): string {
+  return `${Number((fraction * 100).toFixed(1))}%`;
+}
+
+/** "15% of revenue each" when the founder rates match, else "15% / 10% of revenue". */
+export function founderRateLabel(rates: number[]): string {
+  const first = rates[0];
+  if (first !== undefined && rates.every((r) => r === first)) {
+    return `${formatPercent(first)} of revenue each`;
+  }
+  return `${rates.map(formatPercent).join(" / ")} of revenue`;
+}
+
 /** The currency symbol for the active display currency. */
 export function currencySymbol(currency: CurrencyCode): string {
   return currency === "INR" ? "₹" : "$";

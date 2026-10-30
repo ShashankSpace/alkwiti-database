@@ -16,29 +16,19 @@ import { DashboardShell } from "@/components/dashboard/shell";
 import { KpiCard, SectionCard, GoalBar, useMoney } from "@/components/dashboard/primitives";
 import { usePeriodData } from "@/components/dashboard/use-period-data";
 import type { RangePreset } from "@/components/dashboard/date-range";
-import { bucketize, expensesByCategory } from "@/lib/finance/engine";
-import { convert, currencySymbol } from "@/lib/finance/currency";
+import {
+  EXPENSE_BUCKET_LABELS,
+  EXPENSE_CATEGORY_LABELS,
+  bucketize,
+  expensesByCategory,
+} from "@/lib/finance/engine";
+import { convert, currencySymbol, formatPercent } from "@/lib/finance/currency";
 import { useFinance } from "@/lib/finance/store";
-import type { ExpenseCategory } from "@/lib/finance/types";
 
 export const Route = createFileRoute("/expenses")({
   head: () => ({ meta: [{ title: "Expenses · ALKWITI" }] }),
   component: ExpensesPage,
 });
-
-const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
-  software: "Software & subscriptions",
-  internet: "Internet",
-  marketing: "Marketing",
-  printing: "Printing",
-  brochures: "Brochures",
-  "business-cards": "Business cards",
-  travel: "Travel",
-  office: "Office",
-  "professional-services": "Professional services",
-  "business-tools": "Business tools",
-  other: "Other",
-};
 
 const CATEGORY_COLORS = [
   "var(--color-chart-1)",
@@ -81,13 +71,17 @@ function ExpensesPage() {
           invertDelta
         />
         <KpiCard label="Operational Budget" amountInr={data.operational.budget} icon={Wallet} />
-        <KpiCard label="Budget Remaining" amountInr={data.operational.remaining} icon={Gauge} />
+        <KpiCard
+          label="Operational Remaining"
+          amountInr={data.operational.remaining}
+          icon={Gauge}
+        />
       </div>
 
       {/* Operational utilization */}
       <SectionCard
         title="Operational budget utilization"
-        description="30% of ALKWITI revenue is the operational allocation"
+        description={`${formatPercent(data.operational.allocationRate)} of ALKWITI revenue is the operational allocation — operational categories only`}
         className="mt-4"
       >
         <div className="flex flex-wrap items-end justify-between gap-2">
@@ -96,7 +90,7 @@ function ExpensesPage() {
               {money(data.operational.spent)}
             </p>
             <p className="text-sm text-muted-foreground">
-              spent of {money(data.operational.budget)} budget
+              operational spend of {money(data.operational.budget)} budget
             </p>
           </div>
           <p className="text-3xl font-semibold tabular-nums text-brand">
@@ -166,19 +160,22 @@ function ExpensesPage() {
         </SectionCard>
 
         {/* By category */}
-        <SectionCard title="Expenses by category" description="Where the money goes">
+        <SectionCard
+          title="Expenses by category"
+          description="All outflows, including founder salaries and goal spend"
+        >
           <div className="space-y-3">
             {byCategory.map((c, idx) => {
               const share = totalExpenses > 0 ? c.amount / totalExpenses : 0;
               return (
-                <div key={c.category}>
+                <div key={c.key}>
                   <div className="flex items-center justify-between text-sm">
                     <span className="flex items-center gap-2 text-foreground">
                       <span
                         className="size-2.5 shrink-0 rounded-full"
                         style={{ background: CATEGORY_COLORS[idx % CATEGORY_COLORS.length] }}
                       />
-                      {CATEGORY_LABELS[c.category]}
+                      {c.label}
                     </span>
                     <span className="tabular-nums text-muted-foreground">
                       {money(c.amount, { compact: true })} · {Math.round(share * 100)}%
@@ -204,7 +201,11 @@ function ExpensesPage() {
       </div>
 
       {/* Ledger */}
-      <SectionCard title="Expense records" description="Imported actual spend" className="mt-4">
+      <SectionCard
+        title="Expense records"
+        description="Every outflow from the account"
+        className="mt-4"
+      >
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead>
@@ -224,7 +225,10 @@ function ExpensesPage() {
                   </td>
                   <td className="py-2.5 font-medium text-foreground">{e.description}</td>
                   <td className="py-2.5 text-muted-foreground">
-                    {e.categoryLabel ?? CATEGORY_LABELS[e.category]}
+                    {e.categoryLabel ??
+                      (e.bucket !== "operational"
+                        ? EXPENSE_BUCKET_LABELS[e.bucket]
+                        : EXPENSE_CATEGORY_LABELS[e.category])}
                   </td>
                   <td className="py-2.5 text-muted-foreground">{e.vendor ?? "—"}</td>
                   <td className="py-2.5 text-right font-medium tabular-nums text-foreground">
