@@ -35,22 +35,38 @@ import type {
 // ---- property readers (tolerant of missing/renamed fields) ----------------
 
 type Props = PageObjectResponse["properties"];
+type Prop = Props[string];
+
+/**
+ * Look up a property by name, tolerant of casing and stray whitespace, so
+ * "Invoice Date" in Notion matches "Invoice date" here (and "Category " with a
+ * trailing space still matches "Category").
+ */
+function getProp(props: Props, name: string): Prop | undefined {
+  const exact = props[name];
+  if (exact) return exact;
+  const want = name.trim().toLowerCase().replace(/\s+/g, " ");
+  for (const [key, value] of Object.entries(props)) {
+    if (key.trim().toLowerCase().replace(/\s+/g, " ") === want) return value;
+  }
+  return undefined;
+}
 
 function readTitle(props: Props, name: string): string {
-  const p = props[name];
+  const p = getProp(props, name);
   if (p?.type === "title") return p.title.map((t) => t.plain_text).join("").trim();
   return "";
 }
 
 function readText(props: Props, name: string): string {
-  const p = props[name];
+  const p = getProp(props, name);
   if (p?.type === "rich_text") return p.rich_text.map((t) => t.plain_text).join("").trim();
   if (p?.type === "title") return p.title.map((t) => t.plain_text).join("").trim();
   return "";
 }
 
 function readNumber(props: Props, name: string): number {
-  const p = props[name];
+  const p = getProp(props, name);
   if (p?.type === "number" && typeof p.number === "number") return p.number;
   if (p?.type === "formula" && p.formula.type === "number" && typeof p.formula.number === "number")
     return p.formula.number;
@@ -58,15 +74,16 @@ function readNumber(props: Props, name: string): number {
 }
 
 function readDate(props: Props, name: string): string | undefined {
-  const p = props[name];
+  const p = getProp(props, name);
   if (p?.type === "date" && p.date?.start) return p.date.start.slice(0, 10);
   return undefined;
 }
 
 function readSelect(props: Props, name: string): string {
-  const p = props[name];
+  const p = getProp(props, name);
   if (p?.type === "select") return p.select?.name?.trim() ?? "";
   if (p?.type === "status") return p.status?.name?.trim() ?? "";
+  if (p?.type === "multi_select") return p.multi_select[0]?.name?.trim() ?? "";
   return "";
 }
 
@@ -84,6 +101,11 @@ const CATEGORY_ALIASES: Record<string, ExpenseCategory> = {
   software: "software",
   subscription: "software",
   subscriptions: "software",
+  "software and subscriptions": "software",
+  "software & subscriptions": "software",
+  internet: "internet",
+  "internet expenses": "internet",
+  "internet expense": "internet",
   marketing: "marketing",
   ads: "marketing",
   advertising: "marketing",
@@ -210,12 +232,14 @@ function pageToExpense(page: PageObjectResponse): ExpenseRecord | null {
 
   const vendor = readText(props, "Vendor");
   const reference = readText(props, "Reference") || readText(props, "Reference number");
+  const rawCategory = readSelect(props, "Category") || readText(props, "Category");
 
   return {
     id: page.id,
     date: date ?? new Date().toISOString().slice(0, 10),
     description,
-    category: normalizeCategory(readSelect(props, "Category") || readText(props, "Category")),
+    category: normalizeCategory(rawCategory),
+    ...(rawCategory ? { categoryLabel: rawCategory } : {}),
     amount,
     currency: "INR",
     inrEquivalent: amount,

@@ -28,6 +28,7 @@ export const Route = createFileRoute("/expenses")({
 
 const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   software: "Software & subscriptions",
+  internet: "Internet",
   marketing: "Marketing",
   printing: "Printing",
   brochures: "Brochures",
@@ -222,7 +223,9 @@ function ExpensesPage() {
                     {format(parseISO(e.date), "d MMM yy")}
                   </td>
                   <td className="py-2.5 font-medium text-foreground">{e.description}</td>
-                  <td className="py-2.5 text-muted-foreground">{CATEGORY_LABELS[e.category]}</td>
+                  <td className="py-2.5 text-muted-foreground">
+                    {e.categoryLabel ?? CATEGORY_LABELS[e.category]}
+                  </td>
                   <td className="py-2.5 text-muted-foreground">{e.vendor ?? "—"}</td>
                   <td className="py-2.5 text-right font-medium tabular-nums text-foreground">
                     {money(e.inrEquivalent)}

@@ -50,6 +50,7 @@ export interface InvoiceRecord {
 
 export type ExpenseCategory =
   | "software"
+  | "internet"
   | "marketing"
   | "printing"
   | "brochures"
@@ -67,6 +68,8 @@ export interface ExpenseRecord {
   date: string;
   description: string;
   category: ExpenseCategory;
+  /** The category name exactly as written in the source (e.g. the Notion select label). */
+  categoryLabel?: string;
   /** Amount spent (INR). */
   amount: number;
   currency: CurrencyCode;
