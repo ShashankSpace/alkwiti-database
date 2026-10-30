@@ -38,12 +38,36 @@ Create these as **full-page databases** (not inline). Property names are
 | Property | Type | Notes |
 | --- | --- | --- |
 | `Description` | **Title** | Required. |
-| `Category` | Select | e.g. Software, Marketing, Travel, Office… |
+| `Category` | Select | Drives classification — see below. |
 | `Reference amount` | Number | INR. The amount spent (drives expense totals). |
 | `Date` | Date | Primary date used for weekly/monthly grouping. |
 | `Invoice date` | Date | Optional. |
 | `Due date` | Date | Optional. |
-| `Vendor` | Text | Optional. |
+| `Vendor` | Text | For `Founder Salary` rows, this names which founder. |
+
+#### Category-based classification
+
+Each Expenses row is routed by its `Category` select into one of four buckets.
+Category matching is case-insensitive and trimmed, but these are the canonical
+option labels:
+
+| `Category` option | Treated as | Effect |
+| --- | --- | --- |
+| `Founder Salary` | Founder salary payment | Added to the matching founder's **paid** total (actual vs allocated). NOT an operational expense. The `Vendor` field selects the founder (see below). |
+| `China Industry Visit` | China goal contribution | Shown as **Contributed (actual)** on the China goal, alongside the computed allocation projection. |
+| `Dubai Incorporation` | Dubai goal contribution | Shown as **Contributed (actual)** on the Dubai goal, alongside the computed allocation projection. |
+| *any other category* | Operational expense | Counts toward operational spend exactly as before — e.g. Software, Marketing, Travel, Office, Printing, Software and Subscriptions, Internet Expenses. |
+
+Rows in the first three buckets are peeled out of operational expenses, so they
+never inflate total expenses or available cash.
+
+**Founder matching for `Founder Salary` rows:** the `Vendor` string is matched
+against the founder names in Settings (defaults: `Shashank Space`,
+`Mithrha Ramakrishnan`). Matching is tolerant — case-insensitive exact name,
+then first-name token, then substring either direction — so `Shashank`,
+`shashank space`, or the full name all resolve. A salary row whose `Vendor`
+matches no founder is skipped (logged server-side) and never counted as an
+operational expense.
 
 All money is stored in **INR** (the dashboard's source-of-truth currency). USD is
 a display-only conversion in the app.
@@ -106,8 +130,10 @@ sync status rather than breaking.
 - The 2025-09-03 Notion API introduced **data sources**; the reader resolves the
   database's first data source automatically, so you only need the database ID.
 - Duplicate invoices are de-duped by reference + date + customer + order value.
-- Salary payments aren't read from Notion yet (allocations are computed from
-  revenue). A third database can be added later if you want to track actual
-  founder payouts.
+- Salary payments ARE read from Notion: `Founder Salary` expense rows are mapped
+  to the matching founder and shown as **actual paid vs allocated** on the salary
+  cards. `China Industry Visit` and `Dubai Incorporation` rows are shown as actual
+  **contributed** amounts alongside each goal's computed allocation projection —
+  the projection math is unchanged; the actuals are added next to it.
 - Refresh is on-demand via the header refresh button; add polling later if you
   want near-live updates.

@@ -110,11 +110,27 @@ function Overview() {
                   small
                 />
                 <SummaryRow label="China visit (40%)" value={money(data.china.accumulated)} small />
+                {data.china.contributed > 0 && (
+                  <SummaryRow
+                    label="China contributed (actual)"
+                    value={money(data.china.contributed)}
+                    small
+                    muted
+                  />
+                )}
                 <SummaryRow
                   label={`Dubai (${Math.round(data.dubai.currentRate * 100)}%)`}
                   value={money(data.dubai.accumulated)}
                   small
                 />
+                {data.dubai.contributed > 0 && (
+                  <SummaryRow
+                    label="Dubai contributed (actual)"
+                    value={money(data.dubai.contributed)}
+                    small
+                    muted
+                  />
+                )}
                 <SummaryRow
                   label={`Operational (${Math.round(data.operational.allocationRate * 100)}%)`}
                   value={money(data.operational.budget)}

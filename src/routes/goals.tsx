@@ -71,7 +71,7 @@ function GoalsPage() {
       {/* Salary allocations */}
       <SectionCard
         title="Founder salary allocations"
-        description="15% of ALKWITI revenue allocated to each founder"
+        description="15% of ALKWITI revenue allocated — paid reflects actual Notion salary rows"
         className="mt-4"
       >
         <div className="grid gap-5 sm:grid-cols-2">

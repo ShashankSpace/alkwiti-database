@@ -1,9 +1,12 @@
 import { Client, isFullPage } from "@notionhq/client";
 import type { PageObjectResponse } from "@notionhq/client/build/src/api-endpoints";
+import { DEFAULT_CONFIG } from "./config";
 import type { FinanceDataSource } from "./data-source";
 import type {
   ExpenseCategory,
   ExpenseRecord,
+  FounderConfig,
+  GoalContribution,
   InvoiceRecord,
   PaymentStatus,
   SalaryPayment,
@@ -106,6 +109,54 @@ function normalizeCategory(raw: string): ExpenseCategory {
   return CATEGORY_ALIASES[v] ?? "other";
 }
 
+/**
+ * Classify a RAW Notion Category select value into one of the special buckets
+ * or "operational". This runs on the raw string (trimmed + lower-cased),
+ * independently of `normalizeCategory` — which collapses these special labels
+ * to "other" and so cannot carry their meaning.
+ *
+ *   "Founder Salary"        → salary       (→ actual SalaryPayment)
+ *   "China Industry Visit"  → china        (→ actual China contribution)
+ *   "Dubai Incorporation"   → dubai        (→ actual Dubai contribution)
+ *   anything else           → operational  (→ ordinary operating expense)
+ */
+export function classifyRawCategory(raw: string): "salary" | "china" | "dubai" | "operational" {
+  const v = raw.trim().toLowerCase();
+  if (v === "founder salary") return "salary";
+  if (v === "china industry visit") return "china";
+  if (v === "dubai incorporation") return "dubai";
+  return "operational";
+}
+
+/**
+ * Match a Vendor string from a salary row against the configured founders and
+ * return the matching founder `id`, or `null` if none matches. Tolerant of
+ * casing, surrounding whitespace, and partial names ("Mithrha" vs
+ * "Mithrha Ramakrishnan"): tries exact (case-insensitive) name match, then a
+ * first-token match, then a substring match in either direction.
+ */
+export function matchFounder(vendor: string, founders: FounderConfig[]): string | null {
+  const v = vendor.trim().toLowerCase();
+  if (!v) return null;
+
+  // 1. Exact (case-insensitive, trimmed) name match.
+  for (const f of founders) {
+    if (f.name.trim().toLowerCase() === v) return f.id;
+  }
+  // 2. First-token match (e.g. "shashank" ↔ "Shashank Space").
+  const vendorFirst = v.split(/\s+/)[0] ?? "";
+  for (const f of founders) {
+    const founderFirst = f.name.trim().toLowerCase().split(/\s+/)[0] ?? "";
+    if (vendorFirst && founderFirst && vendorFirst === founderFirst) return f.id;
+  }
+  // 3. Substring match in either direction.
+  for (const f of founders) {
+    const n = f.name.trim().toLowerCase();
+    if (n && (n.includes(v) || v.includes(n))) return f.id;
+  }
+  return null;
+}
+
 // ---- mappers ---------------------------------------------------------------
 
 function pageToInvoice(page: PageObjectResponse): InvoiceRecord | null {
@@ -202,6 +253,13 @@ export function normalizeNotionId(raw: string): string {
   return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
 }
 
+/** The Expenses DB split into its three buckets by raw Category. */
+interface ExpensePartition {
+  expenses: ExpenseRecord[];
+  salaryPayments: SalaryPayment[];
+  goalContributions: GoalContribution[];
+}
+
 export class NotionDataSource implements FinanceDataSource {
   readonly name = "Notion";
   readonly isSample = false;
@@ -209,6 +267,9 @@ export class NotionDataSource implements FinanceDataSource {
 
   /** Cache of database ID → its first data source ID (resolved once per instance). */
   private dataSourceIds = new Map<string, string>();
+
+  /** Memoized Expenses-DB partition so the three getters share one query. */
+  private expensePartition: Promise<ExpensePartition> | null = null;
 
   private revenueDatabaseId: string;
   private expensesDatabaseId: string;
@@ -265,14 +326,90 @@ export class NotionDataSource implements FinanceDataSource {
     return pages.map(pageToInvoice).filter((r): r is InvoiceRecord => r !== null);
   }
 
+  /**
+   * Query the Expenses DB once and partition every row by its RAW Category:
+   *   - "Founder Salary"       → SalaryPayment (Vendor → founderId)
+   *   - "China Industry Visit" → GoalContribution (china)
+   *   - "Dubai Incorporation"  → GoalContribution (dubai)
+   *   - anything else          → operational ExpenseRecord
+   * Salary / goal rows are excluded from operational expenses so they never
+   * inflate spend or available cash. The result is memoized so the three public
+   * getters share a single query.
+   */
+  private async partitionExpenses(): Promise<ExpensePartition> {
+    if (!this.expensePartition) {
+      this.expensePartition = this.queryAll(this.expensesDatabaseId).then((pages) => {
+        const expenses: ExpenseRecord[] = [];
+        const salaryPayments: SalaryPayment[] = [];
+        const goalContributions: GoalContribution[] = [];
+
+        for (const page of pages) {
+          const props = page.properties;
+          const rawCategory = readSelect(props, "Category") || readText(props, "Category");
+          const bucket = classifyRawCategory(rawCategory);
+
+          if (bucket === "operational") {
+            const record = pageToExpense(page);
+            if (record) expenses.push(record);
+            continue;
+          }
+
+          // Shared reads for the special buckets (mirrors pageToExpense).
+          const description = readTitle(props, "Description") || readText(props, "Description");
+          const amount = readNumber(props, "Reference amount") || readNumber(props, "Amount");
+          const date =
+            readDate(props, "Date") ??
+            readDate(props, "Invoice date") ??
+            readDate(props, "Due date") ??
+            new Date().toISOString().slice(0, 10);
+          const vendor = readText(props, "Vendor");
+
+          // Skip rows that are clearly empty / not yet filled in.
+          if (!description && !amount) continue;
+
+          if (bucket === "salary") {
+            const founderId = matchFounder(vendor, DEFAULT_CONFIG.founders);
+            if (!founderId) {
+              // Keep unmatched salary rows OUT of operational expenses; skip gracefully.
+              console.warn(
+                `[notion-source] Founder Salary row "${description}" has Vendor "${vendor}" ` +
+                  `that matches no configured founder — skipping.`,
+              );
+              continue;
+            }
+            salaryPayments.push({ id: page.id, founderId, date, amount });
+            continue;
+          }
+
+          // bucket is "china" | "dubai".
+          goalContributions.push({
+            key: bucket,
+            id: page.id,
+            date,
+            amount,
+            ...(description ? { description } : {}),
+            ...(vendor ? { vendor } : {}),
+          });
+        }
+
+        return { expenses, salaryPayments, goalContributions };
+      });
+    }
+    return this.expensePartition;
+  }
+
   async getExpenses(): Promise<ExpenseRecord[]> {
-    const pages = await this.queryAll(this.expensesDatabaseId);
-    return pages.map(pageToExpense).filter((r): r is ExpenseRecord => r !== null);
+    // Operational rows only — salary / China / Dubai rows are peeled off.
+    return (await this.partitionExpenses()).expenses;
   }
 
   async getSalaryPayments(): Promise<SalaryPayment[]> {
-    // Salary payments aren't tracked in Notion for now — allocations are computed
-    // from revenue, and payments can be added as a third database later.
-    return [];
+    // Real "Founder Salary" rows from Notion, mapped Vendor → founderId.
+    return (await this.partitionExpenses()).salaryPayments;
+  }
+
+  async getGoalContributions(): Promise<GoalContribution[]> {
+    // Actual "China Industry Visit" / "Dubai Incorporation" rows.
+    return (await this.partitionExpenses()).goalContributions;
   }
 }

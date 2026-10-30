@@ -47,6 +47,15 @@ export function GoalCard({ goal }: { goal: GoalProgress }) {
         <span>{money(goal.remaining)} remaining</span>
       </div>
 
+      {(goal.contributed ?? 0) > 0 && (
+        <div className="mt-3 flex items-center justify-between rounded-lg border border-border bg-background px-2.5 py-2 text-xs">
+          <span className="text-muted-foreground">Contributed (actual)</span>
+          <span className="font-medium tabular-nums text-foreground">
+            {money(goal.contributed ?? 0)}
+          </span>
+        </div>
+      )}
+
       {goal.rateReason && (
         <p
           className={cn(

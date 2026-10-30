@@ -21,7 +21,7 @@ import { previousRange, resolveRange, type RangePreset } from "./date-range";
  * cumulative — a date filter narrows the KPIs/charts, not the goal totals.
  */
 export function usePeriodData(preset: RangePreset) {
-  const { invoices, expenses, salaryPayments, config } = useFinance();
+  const { invoices, expenses, salaryPayments, goalContributions, config } = useFinance();
 
   return useMemo(() => {
     const derived = dataDateRange(invoices, expenses);
@@ -47,9 +47,13 @@ export function usePeriodData(preset: RangePreset) {
     };
 
     // Lifetime figures drive cumulative goals & allocations.
+    // `expenses` here is the operational-only array: the Notion source's
+    // getExpenses() and SAMPLE_EXPENSES both exclude salary/China/Dubai rows,
+    // so computeTotals / computeOperational are never inflated by them. Real
+    // salary payments and goal contributions flow in via their own channels.
     const lifetime = computeTotals(invoices, expenses);
-    const china = computeChinaGoal(lifetime.alkwitiRevenue, config);
-    const dubai = computeDubaiGoal(lifetime.alkwitiRevenue, config);
+    const china = computeChinaGoal(lifetime.alkwitiRevenue, config, goalContributions);
+    const dubai = computeDubaiGoal(lifetime.alkwitiRevenue, config, goalContributions);
     const salaries = computeSalaries(lifetime.alkwitiRevenue, config, salaryPayments);
     const operational = computeOperational(lifetime.alkwitiRevenue, config, expenses);
 
@@ -66,5 +70,5 @@ export function usePeriodData(preset: RangePreset) {
       salaries,
       operational,
     };
-  }, [invoices, expenses, salaryPayments, config, preset]);
+  }, [invoices, expenses, salaryPayments, goalContributions, config, preset]);
 }

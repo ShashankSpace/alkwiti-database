@@ -14,6 +14,7 @@ import type {
   CurrencyCode,
   ExpenseRecord,
   FinanceConfig,
+  GoalContribution,
   InvoiceRecord,
   SalaryPayment,
 } from "./types";
@@ -41,6 +42,7 @@ interface FinanceState {
   invoices: InvoiceRecord[];
   expenses: ExpenseRecord[];
   salaryPayments: SalaryPayment[];
+  goalContributions: GoalContribution[];
 
   loading: boolean;
   error: string | null;
@@ -57,6 +59,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
+  const [goalContributions, setGoalContributions] = useState<GoalContribution[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<{ name: string; isSample: boolean }>({
@@ -84,6 +87,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         setInvoices(dedupeInvoices(payload.invoices));
         setExpenses(payload.expenses);
         setSalaryPayments(payload.salaryPayments);
+        setGoalContributions(payload.goalContributions);
         setSource(payload.source);
         setError(payload.warning ?? null);
         setLastSyncedAt(new Date());
@@ -122,6 +126,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       invoices,
       expenses,
       salaryPayments,
+      goalContributions,
       loading,
       error,
       source,
@@ -136,6 +141,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       invoices,
       expenses,
       salaryPayments,
+      goalContributions,
       loading,
       error,
       source,

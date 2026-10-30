@@ -1,4 +1,4 @@
-import type { ExpenseRecord, InvoiceRecord, SalaryPayment } from "./types";
+import type { ExpenseRecord, GoalContribution, InvoiceRecord, SalaryPayment } from "./types";
 
 /**
  * The Data Layer boundary.
@@ -24,8 +24,11 @@ export interface FinanceDataSource {
   readonly isSample: boolean;
 
   getInvoices(): Promise<InvoiceRecord[]>;
+  /** Operational expenses only — salary / China / Dubai rows are peeled off. */
   getExpenses(): Promise<ExpenseRecord[]>;
   getSalaryPayments(): Promise<SalaryPayment[]>;
+  /** Actual categorized contributions toward the China / Dubai goals. */
+  getGoalContributions(): Promise<GoalContribution[]>;
 }
 
 /**

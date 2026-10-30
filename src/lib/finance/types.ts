@@ -90,6 +90,23 @@ export interface SalaryPayment {
   sample?: boolean;
 }
 
+/**
+ * A recorded contribution actually made toward a goal (China/Dubai), read from
+ * a categorized Notion expense row. These are ACTUAL amounts spent toward the
+ * goal, distinct from the computed allocation projection on `GoalProgress`.
+ */
+export interface GoalContribution {
+  /** Which goal this contribution counts toward. */
+  key: "china" | "dubai";
+  id: string;
+  date: string;
+  /** Amount contributed (INR). */
+  amount: number;
+  description?: string;
+  vendor?: string;
+  sample?: boolean;
+}
+
 /** A recorded contribution actually set aside toward a goal (optional; allocations are computed). */
 export interface FounderConfig {
   id: string;
@@ -152,6 +169,12 @@ export interface GoalProgress {
   currentRate: number;
   /** Human explanation of why the rate is what it is (Dubai stage). */
   rateReason?: string;
+  /**
+   * Actual categorized spend contributed toward this goal (INR), summed from
+   * Notion rows tagged with the goal's category. Distinct from the computed
+   * `accumulated` projection — this is money genuinely spent, not an allocation.
+   */
+  contributed: number;
 }
 
 /** Computed salary allocation vs payments for one founder. */

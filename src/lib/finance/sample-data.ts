@@ -1,5 +1,5 @@
 import type { FinanceDataSource } from "./data-source";
-import type { ExpenseRecord, InvoiceRecord, SalaryPayment } from "./types";
+import type { ExpenseRecord, GoalContribution, InvoiceRecord, SalaryPayment } from "./types";
 
 /**
  * ============================================================================
@@ -323,6 +323,51 @@ export const SAMPLE_SALARY_PAYMENTS: SalaryPayment[] = [
   { id: "PAY-004", founderId: "mithrha", date: "2026-08-05", amount: 15000, sample: true },
 ];
 
+/**
+ * Actual categorized contributions toward the China / Dubai goals. These model
+ * Notion expense rows tagged "China Industry Visit" / "Dubai Incorporation" —
+ * money genuinely spent toward each goal, shown alongside the computed
+ * allocation projection (never folded into operational spend).
+ */
+export const SAMPLE_GOAL_CONTRIBUTIONS: GoalContribution[] = [
+  {
+    key: "china",
+    id: "GC-001",
+    date: "2026-07-14",
+    amount: 32000,
+    description: "China Industry Visit — flight deposit",
+    vendor: "Air China",
+    sample: true,
+  },
+  {
+    key: "china",
+    id: "GC-002",
+    date: "2026-08-22",
+    amount: 18500,
+    description: "China Industry Visit — supplier meeting logistics",
+    vendor: "Guangzhou Expo",
+    sample: true,
+  },
+  {
+    key: "dubai",
+    id: "GC-003",
+    date: "2026-08-09",
+    amount: 45000,
+    description: "Dubai Incorporation — licensing fee",
+    vendor: "Emirates Corp Advisory",
+    sample: true,
+  },
+  {
+    key: "dubai",
+    id: "GC-004",
+    date: "2026-09-16",
+    amount: 21000,
+    description: "Dubai Incorporation — registered agent",
+    vendor: "Emirates Corp Advisory",
+    sample: true,
+  },
+];
+
 /** In-memory sample implementation of the data-source seam. */
 export class SampleDataSource implements FinanceDataSource {
   readonly name = "Sample data";
@@ -336,5 +381,8 @@ export class SampleDataSource implements FinanceDataSource {
   }
   async getSalaryPayments(): Promise<SalaryPayment[]> {
     return SAMPLE_SALARY_PAYMENTS;
+  }
+  async getGoalContributions(): Promise<GoalContribution[]> {
+    return SAMPLE_GOAL_CONTRIBUTIONS;
   }
 }

@@ -13,6 +13,7 @@ import type {
   ExpenseRecord,
   FinanceConfig,
   FinancialTotals,
+  GoalContribution,
   Granularity,
   GoalProgress,
   InvoiceRecord,
@@ -61,11 +62,19 @@ export function computeTotals(
  * China goal progress. Accumulated = revenue × china.allocationRate.
  * Considered complete once accumulated ≥ target.
  */
-export function computeChinaGoal(revenue: number, config: FinanceConfig): GoalProgress {
+export function computeChinaGoal(
+  revenue: number,
+  config: FinanceConfig,
+  contributions: GoalContribution[] = [],
+): GoalProgress {
   const accumulated = round2(revenue * config.china.allocationRate);
   const target = config.china.target;
   const remaining = round2(Math.max(target - accumulated, 0));
   const completion = target > 0 ? Math.min(accumulated / target, 1) : 0;
+  const contributed = sumBy(
+    contributions.filter((c) => c.key === "china"),
+    (c) => c.amount,
+  );
   return {
     key: "china",
     label: "China Industrial Visit",
@@ -75,6 +84,7 @@ export function computeChinaGoal(revenue: number, config: FinanceConfig): GoalPr
     completion,
     status: accumulated >= target ? "complete" : "in-progress",
     currentRate: config.china.allocationRate,
+    contributed,
   };
 }
 
@@ -89,13 +99,21 @@ export function isChinaComplete(revenue: number, config: FinanceConfig): boolean
  *   - 40% (rateAfterChina) once the China goal is complete
  * The rate is resolved automatically from China's status.
  */
-export function computeDubaiGoal(revenue: number, config: FinanceConfig): GoalProgress {
+export function computeDubaiGoal(
+  revenue: number,
+  config: FinanceConfig,
+  contributions: GoalContribution[] = [],
+): GoalProgress {
   const chinaDone = isChinaComplete(revenue, config);
   const currentRate = chinaDone ? config.dubai.rateAfterChina : config.dubai.rateBeforeChina;
   const accumulated = round2(revenue * currentRate);
   const target = config.dubai.target;
   const remaining = round2(Math.max(target - accumulated, 0));
   const completion = target > 0 ? Math.min(accumulated / target, 1) : 0;
+  const contributed = sumBy(
+    contributions.filter((c) => c.key === "dubai"),
+    (c) => c.amount,
+  );
   return {
     key: "dubai",
     label: "Dubai Company Incorporation",
@@ -108,6 +126,7 @@ export function computeDubaiGoal(revenue: number, config: FinanceConfig): GoalPr
     rateReason: chinaDone
       ? "China Industrial Visit goal completed"
       : "China Industrial Visit goal not yet completed",
+    contributed,
   };
 }
 
